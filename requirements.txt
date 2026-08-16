@@ -1,0 +1,3 @@
+# GUI only. The daemon (mazecloak/daemon.py) runs on the standard library
+# alone, so a broken Qt install can never stop MAC rotation from working.
+PyQt6>=6.6.0

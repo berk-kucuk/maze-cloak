@@ -1,0 +1,36 @@
+/*
+ * Maze Cloak — let the `maze` group control its own daemon, and nothing else.
+ *
+ * Starting and stopping maze-cloak.service is an ordinary, reversible thing a
+ * user does from the app's own window. Without this rule every click raises a
+ * password dialog, which trains people to type their password at whatever asks
+ * — the habit that makes the *next* prompt dangerous.
+ *
+ * The grant is deliberately as narrow as polkit allows:
+ *
+ *   - only members of the `maze` group (the same group Maze Guard uses),
+ *   - only the two systemd actions needed to start/stop/enable a unit,
+ *   - only when the unit in question is maze-cloak.service.
+ *
+ * Anything else — another unit, another action, another group — falls through
+ * to the system default and still prompts. In particular this grants nothing
+ * over the network stack itself: changing a MAC address is done by the daemon,
+ * which is already root, not by the user through this rule.
+ *
+ * Note the unit is re-checked inside the handler rather than trusted from the
+ * action id, because manage-units covers every unit on the system.
+ */
+polkit.addRule(function (action, subject) {
+    if (!subject.isInGroup("maze")) {
+        return;
+    }
+
+    if (action.id !== "org.freedesktop.systemd1.manage-units" &&
+        action.id !== "org.freedesktop.systemd1.manage-unit-files") {
+        return;
+    }
+
+    if (action.lookup("unit") === "maze-cloak.service") {
+        return polkit.Result.YES;
+    }
+});

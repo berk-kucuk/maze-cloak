@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# Maze Cloak post-install hooks: venv creation, config seeding, group setup.
+#
+# Deliberately does NOT enable or start the daemon. Turning on MAC
+# randomisation changes how this machine appears on every network it joins;
+# that is the user's call to make from the app (or with `systemctl enable
+# --now`), not something a package install should decide for them.
+
+_INSTALL_DIR="/opt/maze-cloak"
+_VENV="$_INSTALL_DIR/venv"
+_PIP="$_VENV/bin/pip"
+_CONFIG_DIR="/etc/maze-cloak"
+_CONFIG="$_CONFIG_DIR/config.json"
+
+_PACKAGES=(
+    "PyQt6>=6.6.0"
+)
+
+_info() { echo "  [maze-cloak] $*"; }
+_warn() { echo "  [maze-cloak] WARNING: $*"; }
+_ok()   { echo "  [maze-cloak] ✓ $*"; }
+
+_setup_venv() {
+    _info "Creating Python virtual environment at $_VENV ..."
+    python3 -m venv "$_VENV"
+    "$_PIP" install --quiet --upgrade pip
+    _info "Installing Python packages into venv ..."
+    "$_PIP" install --quiet "${_PACKAGES[@]}"
+    _ok "Python environment ready"
+}
+
+_setup_group() {
+    # systemd-sysusers creates the group from the shipped sysusers.d file, but
+    # run it explicitly so the very first install does not have to wait for a
+    # boot before the config directory can be chgrp'd.
+    if command -v systemd-sysusers &>/dev/null; then
+        systemd-sysusers &>/dev/null || true
+    fi
+    getent group maze &>/dev/null || groupadd -r maze 2>/dev/null || true
+}
+
+_setup_config() {
+    # root:maze 0664 is the whole passwordless story: the GUI runs as the user
+    # and writes this file directly, the daemon (root) reads it. Anyone outside
+    # the group gets read-only, and the app says so instead of failing silently.
+    install -dm775 "$_CONFIG_DIR"
+    chgrp maze "$_CONFIG_DIR" 2>/dev/null || true
+
+    if [[ ! -f "$_CONFIG" ]]; then
+        cat > "$_CONFIG" << 'SEED'
+{
+  "enabled": false,
+  "strategy": "random_vendor",
+  "interfaces": [],
+  "rotate_enabled": true,
+  "rotate_minutes": 30,
+  "rotate_on_start": true,
+  "pause_on_vpn": true,
+  "restore_on_stop": true,
+  "nm_integration": true,
+  "nm_wifi_scan_rand": true,
+  "nm_cloned_mode": "random",
+  "rotate_request": 0
+}
+SEED
+        _ok "Default configuration written to $_CONFIG (cloak starts disabled)"
+    else
+        _info "Keeping existing configuration at $_CONFIG"
+    fi
+
+    chgrp maze "$_CONFIG" 2>/dev/null || true
+    chmod 664 "$_CONFIG" 2>/dev/null || true
+}
+
+_add_user_to_group() {
+    # SUDO_USER is who invoked pacman; without it (an automated install) there
+    # is nobody to add and the user does it themselves.
+    local target="${SUDO_USER:-}"
+    if [[ -z "$target" || "$target" == "root" ]]; then
+        _warn "Add your user to the 'maze' group so the app can save settings:"
+        _warn "    sudo usermod -aG maze \$USER   # then log out and back in"
+        return
+    fi
+    if id -nG "$target" 2>/dev/null | grep -qw maze; then
+        _ok "User '$target' is already in the 'maze' group"
+        return
+    fi
+    usermod -aG maze "$target" 2>/dev/null \
+        && _ok "Added '$target' to the 'maze' group — log out and back in for it to take effect" \
+        || _warn "Could not add '$target' to the 'maze' group; do it manually: sudo usermod -aG maze $target"
+}
+
+_reload_polkit() {
+    # polkit picks up rules.d automatically, but a reload makes the new rule
+    # apply to the session that is running right now.
+    systemctl reload polkit.service &>/dev/null || true
+}
+
+_summary() {
+    echo
+    _info "Maze Cloak is installed but NOT yet running."
+    _info "Start it from the app (Overview → Start daemon), or:"
+    _info "    sudo systemctl enable --now maze-cloak.service"
+    _info "Check state any time with:  maze-cloak --status"
+    echo
+}
+
+post_install() {
+    _setup_venv
+    _setup_group
+    _setup_config
+    _add_user_to_group
+    _reload_polkit
+    systemd-tmpfiles --create &>/dev/null || true
+    _summary
+}
+
+post_upgrade() {
+    _info "Upgrading Maze Cloak ..."
+    [[ -d "$_VENV" ]] || _setup_venv
+    "$_PIP" install --quiet --upgrade "${_PACKAGES[@]}" 2>/dev/null \
+        || _warn "Could not refresh Python packages"
+    _setup_group
+    _setup_config
+    _reload_polkit
+
+    # The daemon keeps running the code it loaded at start, so an upgraded
+    # package plus a live daemon is a stale-code combination that is invisible
+    # from the GUI.
+    if systemctl is-active --quiet maze-cloak.service; then
+        systemctl restart maze-cloak.service &>/dev/null \
+            && _ok "Restarted maze-cloak.service onto the new code" \
+            || _warn "Restart maze-cloak.service to pick up this version"
+    fi
+}
+
+pre_remove() {
+    # Stop before the files go away, and let the daemon's own shutdown path put
+    # the hardware addresses back and remove the NetworkManager drop-in.
+    if systemctl is-active --quiet maze-cloak.service; then
+        _info "Stopping maze-cloak.service (restores hardware MAC addresses) ..."
+        systemctl stop maze-cloak.service &>/dev/null || true
+    fi
+    systemctl disable maze-cloak.service &>/dev/null || true
+}
+
+post_remove() {
+    rm -rf "$_INSTALL_DIR/venv"
+
+    # A stale drop-in would leave every other Maze tool reporting "MAC
+    # randomisation: Enabled" for a package that is no longer installed.
+    if [[ -f /etc/NetworkManager/conf.d/99-maze-cloak.conf ]]; then
+        rm -f /etc/NetworkManager/conf.d/99-maze-cloak.conf
+        _info "Removed the NetworkManager drop-in"
+        command -v nmcli &>/dev/null && nmcli general reload conf &>/dev/null || true
+    fi
+
+    rm -rf /var/lib/maze-cloak
+    _info "Configuration left in $_CONFIG_DIR — remove it by hand if you are done."
+    _info "The 'maze' group is shared with other Maze tools and was left alone."
+}

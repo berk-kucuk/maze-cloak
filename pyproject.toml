@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "maze-cloak"
+version = "1.1.0"
+description = "Maze Cloak — MAC adresi randomizasyonu ve zamanlanmış rotasyon"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "berkkucukk" }]
+keywords = ["mac-address", "randomization", "privacy", "anonymity", "linux", "networkmanager"]
+classifiers = [
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Security",
+    "Topic :: System :: Networking",
+]
+
+# The daemon deliberately has no third-party dependency: it must be able to run
+# on a machine where the GUI stack is absent or broken.
+dependencies = ["PyQt6>=6.6.0"]
+
+[project.scripts]
+maze-cloak = "mazecloak.gui.app:run"
+maze-cloak-daemon = "mazecloak.daemon:main"
+
+[project.urls]
+Homepage = "https://github.com/berk-kucuk/maze-cloak"
+
+[tool.setuptools.packages.find]
+include = ["mazecloak*"]

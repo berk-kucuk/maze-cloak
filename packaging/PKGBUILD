@@ -1,0 +1,201 @@
+# Maintainer: berkkucukk <berkkucukk@proton.me>
+#
+# LOCAL-BUILD PKGBUILD.
+# This builds maze-cloak from a source tarball generated out of the local
+# working tree (see ../build-pkg.sh), NOT from a GitHub release tag. The build
+# script writes the correct `pkgver` and drops `maze-cloak-$pkgver.tar.gz` next
+# to this file before invoking makepkg.
+#
+# To publish to the AUR instead, swap the source line for the tagged release
+# and replace 'SKIP' with the real checksum:
+#   source=("$pkgname-$pkgver.tar.gz::https://github.com/berk-kucuk/maze-cloak/archive/refs/tags/v$pkgver.tar.gz")
+
+pkgname=maze-cloak
+pkgver=1.1.0
+pkgrel=1
+pkgdesc="Maze Cloak — MAC address randomisation with scheduled rotation for the Maze suite"
+arch=('x86_64' 'aarch64')
+url="https://github.com/berk-kucuk/maze-cloak"
+license=('GPL3')
+
+# Python packages are installed into an isolated venv at /opt/maze-cloak/venv
+# (NOT into the system Python) — see maze-cloak.install for post_install details.
+depends=(
+    'python>=3.11'     # interpreter only; libs go in venv
+    'iproute2'         # `ip link set … address` — the actual MAC change
+    'polkit'           # lets the maze group start/stop the daemon without a password
+    'systemd'          # runs the rotation daemon
+)
+makedepends=(
+    'imagemagick'      # resize app icon to multiple sizes during build
+)
+optdepends=(
+    'ethtool: read the burned-in hardware address so it can be restored exactly'
+    'networkmanager: per-connection and scan-time randomisation, and status reporting to other Maze tools'
+)
+install=maze-cloak.install
+
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "$srcdir/maze-cloak-${pkgver}"
+
+    # ── Application source → /opt/maze-cloak ───────────────────────────────
+    install -dm755 "$pkgdir/opt/maze-cloak"
+    cp -r mazecloak main.py "$pkgdir/opt/maze-cloak/"
+    [[ -f pyproject.toml   ]] && install -m644 pyproject.toml   "$pkgdir/opt/maze-cloak/"
+    [[ -f requirements.txt ]] && install -m644 requirements.txt "$pkgdir/opt/maze-cloak/"
+    [[ -f MAZE-CLOAK.png   ]] && install -m644 MAZE-CLOAK.png   "$pkgdir/opt/maze-cloak/"
+
+    # Placeholder venv dir — populated in post_install
+    install -dm755 "$pkgdir/opt/maze-cloak/venv"
+
+    # ── Launcher → /usr/bin/maze-cloak ─────────────────────────────────────
+    install -dm755 "$pkgdir/usr/bin"
+    install -m755 /dev/stdin "$pkgdir/usr/bin/maze-cloak" << 'LAUNCHER'
+#!/usr/bin/env bash
+exec /opt/maze-cloak/venv/bin/python3 /opt/maze-cloak/main.py "$@"
+LAUNCHER
+
+    # ── Rotation daemon (systemd) ──────────────────────────────────────────
+    # Runs as root: changing a MAC address needs CAP_NET_ADMIN, and doing it
+    # here rather than in the GUI is what keeps the GUI free of privilege.
+    #
+    # `-m mazecloak.daemon` rather than a path: running the file directly would
+    # put /opt/maze-cloak/mazecloak on sys.path instead of /opt/maze-cloak, and
+    # every `from mazecloak…` import would fail.
+    #
+    # RuntimeDirectory is correct here (unlike in maze-guard, where /run/maze is
+    # shared with maze-tools): /run/maze-cloak belongs to this unit alone, and
+    # having systemd delete it on stop is exactly the behaviour the GUI reads —
+    # a missing state file means "not running".
+    install -dm755 "$pkgdir/usr/lib/systemd/system"
+    install -m644 /dev/stdin "$pkgdir/usr/lib/systemd/system/maze-cloak.service" << 'UNIT'
+[Unit]
+Description=Maze Cloak MAC randomisation daemon
+Documentation=https://github.com/berk-kucuk/maze-cloak
+After=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/maze-cloak
+ExecStart=/opt/maze-cloak/venv/bin/python3 -m mazecloak.daemon
+Restart=on-failure
+RestartSec=3
+
+RuntimeDirectory=maze-cloak
+RuntimeDirectoryMode=0755
+StateDirectory=maze-cloak
+StateDirectoryMode=0700
+
+# Conservative hardening. ProtectSystem stays 'true' rather than 'strict'
+# because the daemon writes /etc/NetworkManager/conf.d — the drop-in that tells
+# the rest of the Maze suite whether randomisation is on.
+ProtectHome=true
+ProtectSystem=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectHostname=true
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+    # ── polkit: the maze group may control this one unit, silently ─────────
+    # Without it every Start/Stop click raises a password dialog. See the file
+    # itself for why the grant is scoped the way it is.
+    install -dm755 "$pkgdir/usr/share/polkit-1/rules.d"
+    _rules="49-maze-cloak.rules"
+    [[ -f "$_rules" ]] || _rules="packaging/49-maze-cloak.rules"
+    install -m644 "$_rules" \
+        "$pkgdir/usr/share/polkit-1/rules.d/49-maze-cloak.rules"
+
+    # ── sysusers: the 'maze' group, shared with Maze Guard ─────────────────
+    install -dm755 "$pkgdir/usr/lib/sysusers.d"
+    install -m644 /dev/stdin "$pkgdir/usr/lib/sysusers.d/maze-cloak.conf" << 'SYSUSERS'
+g maze -
+SYSUSERS
+
+    # ── tmpfiles: /etc/maze-cloak, group-writable ──────────────────────────
+    # This is what lets the GUI save settings without a password: the config is
+    # root:maze 0664, so a maze-group member writes it directly and the daemon
+    # picks the change up on its next tick.
+    install -dm755 "$pkgdir/usr/lib/tmpfiles.d"
+    install -m644 /dev/stdin "$pkgdir/usr/lib/tmpfiles.d/maze-cloak.conf" << 'TMPFILES'
+d /etc/maze-cloak 0775 root maze -
+TMPFILES
+
+    # ── .desktop entry (application menu) ──────────────────────────────────
+    install -dm755 "$pkgdir/usr/share/applications"
+    install -m644 /dev/stdin "$pkgdir/usr/share/applications/maze-cloak.desktop" << 'DESKTOP'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Maze Cloak
+GenericName=MAC Address Randomisation
+Comment=Randomise and rotate your network hardware address
+Exec=/usr/bin/maze-cloak
+Icon=maze-cloak
+Terminal=false
+Categories=Network;Security;System;Settings;
+Keywords=mac;address;randomisation;randomization;privacy;anonymity;wifi;network;spoof;
+StartupNotify=true
+StartupWMClass=maze-cloak
+X-GNOME-UsesNotifications=true
+DESKTOP
+
+    # ── Autostart entry (start hidden in the system tray on login) ─────────
+    install -dm755 "$pkgdir/etc/xdg/autostart"
+    install -m644 /dev/stdin "$pkgdir/etc/xdg/autostart/maze-cloak.desktop" << 'AUTOSTART'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Maze Cloak
+GenericName=MAC Address Randomisation
+Comment=Start Maze Cloak minimized in the system tray
+Exec=/usr/bin/maze-cloak --background
+Icon=maze-cloak
+Terminal=false
+Categories=Network;Security;System;
+StartupNotify=false
+StartupWMClass=maze-cloak
+X-GNOME-Autostart-enabled=true
+AUTOSTART
+
+    # ── Icons ──────────────────────────────────────────────────────────────
+    # -trim removes the ~10% transparent border the source artwork carries.
+    # Without it the mark renders visibly smaller than every neighbouring icon,
+    # because the panel adds its own padding on top of the padding already
+    # baked into the file. +repage discards the offset -trim records, so the
+    # resize that follows sees a clean canvas.
+    if [[ -f MAZE-CLOAK.png ]]; then
+        for size in 16 22 24 32 48 64 128 256 512; do
+            install -dm755 "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps"
+            _dest="$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/maze-cloak.png"
+            if command -v magick &>/dev/null; then
+                magick MAZE-CLOAK.png -trim +repage -resize "${size}x${size}" \
+                    -background none -gravity center -extent "${size}x${size}" \
+                    "$_dest" 2>/dev/null || install -m644 MAZE-CLOAK.png "$_dest"
+            elif command -v convert &>/dev/null; then
+                convert MAZE-CLOAK.png -trim +repage -resize "${size}x${size}" \
+                    -background none -gravity center -extent "${size}x${size}" \
+                    "$_dest" 2>/dev/null || install -m644 MAZE-CLOAK.png "$_dest"
+            else
+                install -m644 MAZE-CLOAK.png "$_dest"
+            fi
+        done
+    fi
+
+    # ── License ────────────────────────────────────────────────────────────
+    install -dm755 "$pkgdir/usr/share/licenses/$pkgname"
+    [[ -f LICENSE ]] && install -m644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/"
+
+    true
+}

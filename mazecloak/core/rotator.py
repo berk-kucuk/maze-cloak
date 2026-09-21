@@ -100,8 +100,22 @@ class Rotator:
         for name in self.targets():
             ok, _ = self.rotate_one(name)
             rotated += int(ok)
+
+        # The clock is reset whether or not anything actually changed, and that
+        # is the important half. Advancing it only on success reads as the
+        # careful choice and is the opposite: an interface that refuses every
+        # rotation — a managed device that reasserts its own address, a driver
+        # that rejects the change — leaves _last_rotation at 0, next_due() then
+        # answers "now" forever, and tick() re-enters this method on every pass
+        # of a two-second loop. Each of those passes runs set_mac(), whose
+        # fallback takes the link down and back up. A failing rotation would
+        # bring the machine's network down and up every two seconds, for as long
+        # as the daemon runs.
+        #
+        # Only the *reported* last rotation stays conditional: the GUI shows it
+        # to the user, and a failure is not a rotation.
+        self._last_rotation = time.time()
         if rotated:
-            self._last_rotation = time.time()
             self.state.last_rotation = self._last_rotation
         return rotated
 
@@ -159,11 +173,26 @@ class Rotator:
         return max(1, int(self.cfg.rotate_minutes)) * 60.0
 
     def next_due(self) -> float:
+        """When the next rotation is due, for display. 0.0 means "no schedule"."""
         if not (self.cfg.enabled and self.cfg.rotate_enabled):
             return 0.0
         if not self._last_rotation:
             return time.time()
         return self._last_rotation + self.interval
+
+    def is_due(self) -> bool:
+        """Whether to rotate on this tick.
+
+        Separate from next_due() because the two cannot share the "never
+        rotated" answer. next_due() returns *now* for the display, and asking
+        `time.time() >= self.next_due()` evaluates the left side first — so the
+        deadline is always a few microseconds newer than the clock it is
+        compared against, the branch is never taken, and a daemon that has not
+        yet rotated stays that way for as long as it runs.
+        """
+        if not self._last_rotation:
+            return True
+        return time.time() >= self._last_rotation + self.interval
 
     def tick(self) -> None:
         """Do whatever is due. Safe to call as often as you like."""
@@ -190,19 +219,33 @@ class Rotator:
 
         self.state.paused = ""
 
-        if time.time() >= self.next_due():
+        if self.is_due():
             self.rotate_all()
 
         self.state.next_rotation = self.next_due()
 
     def first_run(self) -> None:
-        """Rotate immediately at startup when the config asks for it."""
-        if not (self.cfg.enabled and self.cfg.rotate_on_start):
+        """Rotate immediately at startup when the config asks for it.
+
+        Every path out of here starts the schedule's clock, including the ones
+        that decline to rotate. Leaving it unset would make the next tick treat
+        the rotation as overdue and do immediately what this method just decided
+        not to do.
+        """
+        if not self.cfg.enabled:
+            return
+        if not self.cfg.rotate_on_start:
+            self._start_clock()
             return
         if self.cfg.pause_on_vpn and vpn.is_up():
             self._log("[skip] VPN is up — not rotating at startup")
+            self._start_clock()
             return
         self.rotate_all()
+
+    def _start_clock(self) -> None:
+        """Begin the interval now, without disturbing a real earlier rotation."""
+        self._last_rotation = self._last_rotation or time.time()
 
     # ── state ─────────────────────────────────────────────────────────────
 

@@ -10,6 +10,7 @@ newer version downgrades cleanly instead of refusing to start.
 """
 from __future__ import annotations
 
+import grp
 import json
 import os
 from dataclasses import dataclass, asdict, field, fields
@@ -140,11 +141,30 @@ def save_config(cfg: CloakConfig, path: Path | None = None) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(cfg.sanitised().to_dict(), indent=2))
-    # Group-writable so the next GUI write works too — os.replace preserves the
-    # temp file's mode, not the destination's.
+    # os.replace keeps the temp file's inode, so the destination inherits the
+    # temp file's mode AND its ownership — both have to be set here, not just
+    # the mode.
+    #
+    # Ownership is the half that used to be missed. tmpfiles.d declares this
+    # file root:maze 0664 so that every member of the `maze` group can change
+    # the settings, but a GUI save replaced it with one owned by the saving
+    # user and their personal group. The permissions still looked right, and on
+    # a single-user machine nothing broke — but a second `maze` member silently
+    # lost the ability to save, and the file only returned to root:maze at the
+    # next boot, when systemd-tmpfiles runs. Put the group back explicitly.
     try:
         os.chmod(tmp, 0o664)
     except OSError:
+        pass
+    try:
+        maze_gid = grp.getgrnam("maze").gr_gid
+        # -1 leaves the owner alone: a non-root saver cannot give the file to
+        # root, but it can set the group to one it belongs to, which is the
+        # part that matters for shared access.
+        os.chown(tmp, 0 if os.geteuid() == 0 else -1, maze_gid)
+    except (KeyError, OSError, PermissionError):
+        # No `maze` group, or not a member. The save still succeeds; only the
+        # shared-access property is lost, and tmpfiles restores it at boot.
         pass
     os.replace(tmp, p)
 

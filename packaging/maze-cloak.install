@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Maze Cloak post-install hooks: venv creation, config seeding, group setup.
+# Maze Cloak post-install hooks: config seeding, group setup.
+#
+# Python libraries (PyQt6) are NOT installed here any more: they come from the
+# maze-python package, the shared /opt/maze/venv that pacman tracks.
 #
 # Deliberately does NOT enable or start the daemon. Turning on MAC
 # randomisation changes how this machine appears on every network it joins;
@@ -7,27 +10,12 @@
 # --now`), not something a package install should decide for them.
 
 _INSTALL_DIR="/opt/maze-cloak"
-_VENV="$_INSTALL_DIR/venv"
-_PIP="$_VENV/bin/pip"
 _CONFIG_DIR="/etc/maze-cloak"
 _CONFIG="$_CONFIG_DIR/config.json"
-
-_PACKAGES=(
-    "PyQt6>=6.6.0"
-)
 
 _info() { echo "  [maze-cloak] $*"; }
 _warn() { echo "  [maze-cloak] WARNING: $*"; }
 _ok()   { echo "  [maze-cloak] ✓ $*"; }
-
-_setup_venv() {
-    _info "Creating Python virtual environment at $_VENV ..."
-    python3 -m venv "$_VENV"
-    "$_PIP" install --quiet --upgrade pip
-    _info "Installing Python packages into venv ..."
-    "$_PIP" install --quiet "${_PACKAGES[@]}"
-    _ok "Python environment ready"
-}
 
 _setup_group() {
     # systemd-sysusers creates the group from the shipped sysusers.d file, but
@@ -106,7 +94,6 @@ _summary() {
 }
 
 post_install() {
-    _setup_venv
     _setup_group
     _setup_config
     _add_user_to_group
@@ -117,9 +104,6 @@ post_install() {
 
 post_upgrade() {
     _info "Upgrading Maze Cloak ..."
-    [[ -d "$_VENV" ]] || _setup_venv
-    "$_PIP" install --quiet --upgrade "${_PACKAGES[@]}" 2>/dev/null \
-        || _warn "Could not refresh Python packages"
     _setup_group
     _setup_config
     _reload_polkit
@@ -127,10 +111,18 @@ post_upgrade() {
     # The daemon keeps running the code it loaded at start, so an upgraded
     # package plus a live daemon is a stale-code combination that is invisible
     # from the GUI.
+    # The unit file may have changed (it did when the interpreter moved to
+    # /opt/maze/venv); without a reload systemd restarts the OLD ExecStart.
+    systemctl daemon-reload &>/dev/null || true
     if systemctl is-active --quiet maze-cloak.service; then
         systemctl restart maze-cloak.service &>/dev/null \
             && _ok "Restarted maze-cloak.service onto the new code" \
             || _warn "Restart maze-cloak.service to pick up this version"
+    fi
+    # Only after the restart: a private venv from a pre-maze-python build.
+    if [[ -d "$_INSTALL_DIR/venv" ]]; then
+        rm -rf "$_INSTALL_DIR/venv"
+        _info "Removed the old private venv (PyQt6 now comes from maze-python)"
     fi
 }
 

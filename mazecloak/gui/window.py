@@ -24,7 +24,13 @@ from mazecloak.gui.widgets.overview_view import OverviewView
 from mazecloak.gui.widgets.schedule_view import ScheduleView
 from mazecloak.gui.widgets.settings_view import SettingsView
 
+# While the window is on screen, a rotation should show up almost as soon as the
+# daemon performs it. While it is not — which is most of a session, since the app
+# autostarts into the tray — the only thing reading any of this is the tray
+# tooltip, so the same cadence would be a timer scanning the machine for an
+# answer nobody is looking at.
 _REFRESH_MS = 2000
+_IDLE_REFRESH_MS = 15000
 
 
 class _TitleBar(QWidget):
@@ -69,6 +75,11 @@ class MainWindow(QMainWindow):
         self._timer.setInterval(_REFRESH_MS)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
+
+        # _tick() only refreshes the tab in front, so a tab coming forward has
+        # to catch up now rather than at the next tick. Connected here, not in
+        # _make_tabs, because it reaches the timer the moment it fires.
+        self._tabs.currentChanged.connect(lambda _i: self._tick())
 
         controller.error.connect(self._on_error)
         state.language_changed.connect(self.retranslate)
@@ -242,12 +253,41 @@ class MainWindow(QMainWindow):
 
     def _tick(self) -> None:
         self._c.refresh()
-        self.overview.refresh()
-        self.interfaces.refresh()
+
+        if not self.isVisible():
+            # Hidden in the tray. The tooltip is the only consumer and it needs
+            # the daemon's state file, not a walk of every interface — and the
+            # tabs will be rebuilt by showEvent before anyone sees them.
+            self._set_interval(_IDLE_REFRESH_MS)
+            self._refresh_pill()
+            return
+
+        self._set_interval(_REFRESH_MS)
+        # Only the tab in front. The others are rebuilt when they come forward,
+        # and rebuilding the Interfaces table every two seconds behind a tab
+        # nobody is on is the same work with none of the benefit.
+        current = self._tabs.currentWidget()
+        if current is self.overview:
+            self.overview.refresh()
+        elif current is self.interfaces:
+            self.interfaces.refresh()
+        # These two hold user input, so their refresh() is already a no-op while
+        # they are in front; calling them regardless is what re-syncs them after
+        # a change made elsewhere.
         self.schedule.refresh()
         self.settings.refresh()
         self._refresh_banner()
         self._refresh_pill()
+
+    def _set_interval(self, ms: int) -> None:
+        if self._timer.interval() != ms:
+            self._timer.setInterval(ms)
+
+    def showEvent(self, event) -> None:
+        # Coming back from the tray, the timer is on its slow cadence and the
+        # tabs are up to fifteen seconds stale. Catch up before the first frame.
+        super().showEvent(event)
+        self._tick()
 
     def _refresh_banner(self) -> None:
         t = self._s.t

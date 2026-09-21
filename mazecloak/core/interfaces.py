@@ -3,6 +3,17 @@
 Everything here reads sysfs where it can and shells out to `ip` only for the
 write, which keeps the common path (the GUI refreshing four times a minute)
 free of subprocess spawns.
+
+`describe()` is the exception, and its defaults are load-bearing. Three of the
+fields on `Interface` cannot be answered from sysfs — `permanent` needs ethtool,
+`has_ip` needs `ip addr`, `connection` needs nmcli — so each one is a process
+spawn per interface per call. `describe()` is called from a GUI timer that runs
+whether or not the window is on screen, so those three are opt-in: a caller that
+does not display them does not pay for them, and none of them is on by default.
+
+`permanent_mac()` is cached besides. A burned-in address is a property of the
+hardware and does not change while the device exists, so asking ethtool twice
+for the same one is a spawn spent to re-learn a constant.
 """
 from __future__ import annotations
 
@@ -72,14 +83,31 @@ def current_mac(name: str) -> str:
     return _read(_SYS_NET / name / "address").lower()
 
 
+# Keyed by (name, ifindex) rather than name alone: a USB adapter unplugged and
+# replaced by a different one can reappear under the same name, and it gets a
+# fresh ifindex when it does. The empty answer is cached too — a machine without
+# ethtool will not grow one between two ticks of a 2-second timer.
+_perm_cache: dict[tuple[str, str], str] = {}
+
+
 def permanent_mac(name: str) -> str:
-    """The burned-in address.
+    """The burned-in address, cached for the lifetime of the device.
 
     Tried in two places because neither is universally available: sysfs does not
     expose it on every driver, and ethtool is an optional dependency. Returns ""
     when both fail, which callers must treat as "unknown" rather than "none" —
     restoring to "" would brick the interface.
     """
+    key = (name, _read(_SYS_NET / name / "ifindex"))
+    cached = _perm_cache.get(key)
+    if cached is not None:
+        return cached
+    perm = _permanent_mac_uncached(name)
+    _perm_cache[key] = perm
+    return perm
+
+
+def _permanent_mac_uncached(name: str) -> str:
     perm = _read(_SYS_NET / name / "phys_switch_id")
     from mazecloak.core.mac import is_valid
     if is_valid(perm):
@@ -118,16 +146,21 @@ def _nm_connection(name: str) -> str:
     return ""
 
 
-def describe(name: str, with_nm: bool = True) -> Interface:
+def describe(name: str, with_nm: bool = False, with_permanent: bool = False,
+             with_ip: bool = False) -> Interface:
+    """A snapshot of one interface. Sysfs only unless asked for more.
+
+    Each of the three flags costs one process spawn — see the module docstring.
+    """
     from mazecloak.core.mac import vendor_of
     mac = current_mac(name)
     return Interface(
         name=name,
         mac=mac,
-        permanent=permanent_mac(name),
+        permanent=permanent_mac(name) if with_permanent else "",
         state=_read(_SYS_NET / name / "operstate") or "unknown",
         wireless=is_wireless(name),
-        has_ip=has_ip(name),
+        has_ip=has_ip(name) if with_ip else False,
         vendor=vendor_of(mac),
         connection=_nm_connection(name) if with_nm else "",
     )
@@ -143,9 +176,11 @@ def list_names(include_virtual: bool = False) -> list[str]:
     return [n for n in names if not is_virtual(n)]
 
 
-def list_interfaces(include_virtual: bool = False,
-                    with_nm: bool = True) -> list[Interface]:
-    return [describe(n, with_nm=with_nm)
+def list_interfaces(include_virtual: bool = False, with_nm: bool = False,
+                    with_permanent: bool = False,
+                    with_ip: bool = False) -> list[Interface]:
+    return [describe(n, with_nm=with_nm, with_permanent=with_permanent,
+                     with_ip=with_ip)
             for n in list_names(include_virtual)]
 
 

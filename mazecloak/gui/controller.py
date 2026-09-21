@@ -40,12 +40,14 @@ class CloakController(QObject):
         self.ui: UiConfig = load_ui()
         self.state: DaemonState | None = read_state()
         self._service_available = service.available()
+        self._ifaces: list[ifaces.Interface] | None = None
 
     # ── refresh ───────────────────────────────────────────────────────────
 
     def refresh(self) -> None:
         """Re-read everything the daemon owns. Driven by the window's timer."""
         before = (self.state.to_dict() if self.state else None)
+        self._ifaces = None      # invalidate the snapshot below
         self.state = read_state()
         # Reload the config too: the daemon does not write it, but a second
         # Maze Cloak window or a hand edit might have.
@@ -90,13 +92,21 @@ class CloakController(QObject):
         return "off"
 
     def interfaces(self) -> list[ifaces.Interface]:
-        """Live interface list, annotated with what the daemon is rotating."""
+        """Live interface list, annotated with what the daemon is rotating.
+
+        Scanned once per `refresh()` and shared by every caller in that pass.
+        Three views ask for this list on the same timer tick, and building it
+        three times means three scans of /sys/class/net for an answer that
+        cannot have changed between them.
+        """
+        if self._ifaces is None:
+            self._ifaces = ifaces.list_interfaces()
+        # Re-derived rather than cached with the list: a tick box in the
+        # Interfaces tab changes cfg.interfaces without a rescan.
         selected = set(self.cfg.interfaces)
-        out = []
-        for iface in ifaces.list_interfaces():
+        for iface in self._ifaces:
             iface.rotating = (not selected) or (iface.name in selected)
-            out.append(iface)
-        return out
+        return self._ifaces
 
     def original_of(self, name: str) -> str:
         """The hardware address the daemon recorded, falling back to the driver's."""

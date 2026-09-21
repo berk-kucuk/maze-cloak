@@ -163,12 +163,33 @@ class RotatorTestCase(unittest.TestCase):
 
     # ── scheduling ────────────────────────────────────────────────────────
 
+    def test_the_first_tick_rotates(self):
+        """A daemon that has never rotated is due.
+
+        Worth its own case because the interval test below passes vacuously if
+        nothing ever rotates: it only asserts the address stopped changing.
+        """
+        r = self._rotator(rotate_minutes=30)
+        r.tick()
+        self.assertNotEqual(self.nic.mac, self.nic.permanent,
+                            "the schedule never fired at all")
+
     def test_tick_respects_the_interval(self):
         r = self._rotator(rotate_minutes=30)
         r.tick()
         first = self.nic.mac
+        self.assertNotEqual(first, self.nic.permanent)
         r.tick()
         self.assertEqual(self.nic.mac, first, "rotated twice inside one interval")
+
+    def test_rotate_on_start_off_defers_rather_than_skips(self):
+        """Declining the startup rotation must not leave the clock unstarted:
+        the next tick would then treat it as overdue and rotate anyway."""
+        r = self._rotator(rotate_minutes=30, rotate_on_start=False)
+        r.first_run()
+        r.tick()
+        self.assertEqual(self.nic.mac, self.nic.permanent,
+                         "rotated despite rotate_on_start=False")
 
     def test_tick_rotates_once_due(self):
         r = self._rotator(rotate_minutes=1)
@@ -177,6 +198,29 @@ class RotatorTestCase(unittest.TestCase):
         r._last_rotation = time.time() - 120
         r.tick()
         self.assertNotEqual(self.nic.mac, first)
+
+    def test_a_failing_rotation_does_not_retry_every_tick(self):
+        """The one that takes the machine down with it.
+
+        set_mac's fallback drops the link and brings it back up, so a rotation
+        that fails on every interface must still consume its interval. Retrying
+        on the next tick means the network goes down and up every two seconds
+        for as long as the daemon runs.
+        """
+        r = self._rotator(rotate_minutes=30)
+        self.nic.accept = False
+        calls = []
+        inner = ifaces.set_mac
+        ifaces.set_mac = lambda n, m: (calls.append(n), inner(n, m))[1]
+        try:
+            r.tick()
+            self.assertEqual(len(calls), 1, "the first tick should try once")
+            r.tick()
+            r.tick()
+            self.assertEqual(len(calls), 1,
+                             "retried a failed rotation before the interval was up")
+        finally:
+            ifaces.set_mac = inner
 
     def test_vpn_pauses_rotation(self):
         vpn.is_up = lambda: True

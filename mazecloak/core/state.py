@@ -63,16 +63,51 @@ class DaemonState:
         return cls(interfaces=ifaces, **clean)
 
 
-def write_state(state: DaemonState, path: Path | None = None) -> None:
-    p = path or paths.STATE_PATH
+def _write_json(path: Path, payload: dict) -> None:
+    """Publish a small report atomically. Failure is never fatal."""
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(state.to_dict(), indent=2))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2))
         os.chmod(tmp, 0o644)   # every local user may read the report
-        os.replace(tmp, p)
+        os.replace(tmp, path)
     except OSError:
         pass  # never let a failed status write take the daemon down
+
+
+def _suite_status(state: DaemonState) -> dict:
+    """This tool's line in the Maze suite status contract.
+
+    One question, answered plainly: is this machine currently using a MAC
+    address other than the one burned into the adapter. Maze Guard files this
+    alongside an attack so the incident report can say whether the attacker
+    saw the real hardware address.
+    """
+    randomised = False
+    if state.running and not state.paused:
+        for iface in (state.interfaces or {}).values():
+            mac = getattr(iface, "mac", "") or ""
+            orig = getattr(iface, "original", "") or ""
+            if mac and orig and mac.lower() != orig.lower():
+                randomised = True
+                break
+            if int(getattr(iface, "rotations", 0) or 0) > 0:
+                randomised = True
+                break
+    return {
+        "app": "maze-cloak",
+        "at": time.time(),
+        "running": bool(state.running),
+        "paused": state.paused or "",
+        "mac_randomised": randomised,
+    }
+
+
+def write_state(state: DaemonState, path: Path | None = None) -> None:
+    _write_json(path or paths.STATE_PATH, state.to_dict())
+    # The suite report rides along with the daemon's own, so the two can never
+    # drift: one write, one truth.
+    _write_json(paths.STATUS_PATH, _suite_status(state))
 
 
 def read_state(path: Path | None = None) -> DaemonState | None:
@@ -98,6 +133,12 @@ def read_state(path: Path | None = None) -> DaemonState | None:
 def clear_state(path: Path | None = None) -> None:
     try:
         (path or paths.STATE_PATH).unlink()
+    except OSError:
+        pass
+    # Leave no stale claim behind: a status file outliving the daemon would
+    # tell Maze Guard the MAC was randomised long after it stopped being.
+    try:
+        paths.STATUS_PATH.unlink()
     except OSError:
         pass
 

@@ -39,6 +39,23 @@ NM_DROPIN = Path(os.environ.get(
     "MAZE_CLOAK_NM",
     "/etc/NetworkManager/conf.d/99-maze-cloak.conf"))
 
+# The Maze suite status contract. Every Maze app may publish one small, flat
+# JSON object here; readers take only the keys they understand and must cope
+# with the file being absent, stale or malformed. Maze Guard reads this to
+# record what protection was in place when an attack arrived — see
+# maze-guard/maze/core/posture.py.
+#
+# Same tmpfs lifetime as state.json, and world-readable for the same reason:
+# it is a report, never an instruction.
+#
+# /run/maze is shared: Maze Guard's helper puts its socket there and tightens
+# the directory to 0750 root:maze when it starts. Creating it here with the
+# default mode is safe — mkdir(exist_ok=True) never re-modes a directory that
+# already exists, Guard normalises it whenever it starts, and the only thing
+# this package puts inside is a status report meant to be read.
+STATUS_DIR = Path(os.environ.get("MAZE_STATUS_DIR", "/run/maze/status"))
+STATUS_PATH = STATUS_DIR / "maze-cloak.json"
+
 SERVICE_UNIT = "maze-cloak.service"
 
 # Shared with Maze Guard: a member of this group may change Maze settings

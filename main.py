@@ -45,7 +45,8 @@ def _status() -> int:
 
     print("\ninterfaces:")
     selected = set(cfg.interfaces)
-    for iface in list_interfaces():
+    # A one-shot print can afford the ethtool call the GUI's timer cannot.
+    for iface in list_interfaces(with_permanent=True):
         rotating = (not selected) or (iface.name in selected)
         original = ""
         if state and iface.name in state.interfaces:

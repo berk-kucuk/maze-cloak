@@ -11,17 +11,17 @@
 #   source=("$pkgname-$pkgver.tar.gz::https://github.com/berk-kucuk/maze-cloak/archive/refs/tags/v$pkgver.tar.gz")
 
 pkgname=maze-cloak
-pkgver=1.1.0
-pkgrel=1
+pkgver=1.3.0
+pkgrel=2
 pkgdesc="Maze Cloak — MAC address randomisation with scheduled rotation for the Maze suite"
 arch=('x86_64' 'aarch64')
 url="https://github.com/berk-kucuk/maze-cloak"
 license=('GPL3')
 
-# Python packages are installed into an isolated venv at /opt/maze-cloak/venv
-# (NOT into the system Python) — see maze-cloak.install for post_install details.
+# PyQt6 comes from maze-python, the shared Maze venv at /opt/maze/venv.
+# This package ships only its own code and runs it with that interpreter.
 depends=(
-    'python>=3.11'     # interpreter only; libs go in venv
+    'maze-python'      # shared Python runtime: /opt/maze/venv
     'iproute2'         # `ip link set … address` — the actual MAC change
     'polkit'           # lets the maze group start/stop the daemon without a password
     'systemd'          # runs the rotation daemon
@@ -34,6 +34,11 @@ optdepends=(
     'networkmanager: per-connection and scan-time randomisation, and status reporting to other Maze tools'
 )
 install=maze-cloak.install
+
+# The shipped policy defaults (see the config.json block in package()). It is a
+# config file the admin and the GUI both write, so pacman must preserve local
+# changes and leave a .pacnew instead of overwriting them.
+backup=('etc/maze-cloak/config.json')
 
 source=("$pkgname-$pkgver.tar.gz")
 sha256sums=('SKIP')
@@ -48,15 +53,67 @@ package() {
     [[ -f requirements.txt ]] && install -m644 requirements.txt "$pkgdir/opt/maze-cloak/"
     [[ -f MAZE-CLOAK.png   ]] && install -m644 MAZE-CLOAK.png   "$pkgdir/opt/maze-cloak/"
 
-    # Placeholder venv dir — populated in post_install
-    install -dm755 "$pkgdir/opt/maze-cloak/venv"
-
     # ── Launcher → /usr/bin/maze-cloak ─────────────────────────────────────
     install -dm755 "$pkgdir/usr/bin"
     install -m755 /dev/stdin "$pkgdir/usr/bin/maze-cloak" << 'LAUNCHER'
 #!/usr/bin/env bash
-exec /opt/maze-cloak/venv/bin/python3 /opt/maze-cloak/main.py "$@"
+exec /opt/maze/venv/bin/python3 /opt/maze-cloak/main.py "$@"
 LAUNCHER
+
+    # ── Shipped defaults → /etc/maze-cloak/config.json ─────────────────────
+    # Without this file there is no config at all, load_config() falls back to
+    # the dataclass defaults (enabled=False), and a user who never opens the
+    # window gets NO randomisation — on a distribution whose whole point is
+    # privacy, and for the two layers that cost nothing. Defaults are the only
+    # setting most people ever use, so the default has to be the policy.
+    #
+    # Only the keys Maze deliberately differs on are listed. from_dict() drops
+    # unknown keys and fills missing ones from the dataclass, so everything not
+    # named here keeps tracking upstream instead of being frozen by a copy.
+    #
+    # Why these four:
+    #   enabled=true         turns the tool on. It gates BOTH the NetworkManager
+    #                        drop-in (rotator.sync_nm: `enabled and
+    #                        nm_integration`) and rotation, so nothing happens
+    #                        without it.
+    #   rotate_enabled=false leaves TIMER rotation off. Changing a MAC while
+    #                        connected takes the link down and up
+    #                        (interfaces.py), i.e. the network drops — by
+    #                        default every 30 minutes. That breaks captive
+    #                        portals, DHCP reservations, long transfers and SSH
+    #                        sessions, and it is the one layer a user should opt
+    #                        into knowingly. The two free layers stay on.
+    #   rotate_on_start=false is a SEPARATE switch and turning off the timer is
+    #                        not enough on its own. Rotator.first_run() checks
+    #                        `enabled` and `rotate_on_start` only — never
+    #                        `rotate_enabled` — so leaving it at its default of
+    #                        true would change the MAC through `ip link` once on
+    #                        every boot. That is redundant here (scan-time and
+    #                        per-network randomisation already come from the
+    #                        NetworkManager drop-in) and it is a link down/up
+    #                        during startup, so it is off too. With both off the
+    #                        daemon never touches an interface at all: it writes
+    #                        the drop-in, publishes status, and idles.
+    #   nm_cloned_mode=stable a different address per NETWORK rather than a new
+    #                        one per connection. Still unlinkable between access
+    #                        points, which is the threat that matters, but
+    #                        consistent within a network so portals and address
+    #                        reservations keep working. This is what iOS and
+    #                        Android ship, for the same reason.
+    #
+    # NOTE: the daemon removes the drop-in when it stops ("a claim that
+    # randomisation is active must not outlive the daemon that makes it true"),
+    # so maze-cloak.service has to be enabled for any of this to apply — that is
+    # done in the ISO's enable-services.sh, not here.
+    install -dm755 "$pkgdir/etc/maze-cloak"
+    install -m644 /dev/stdin "$pkgdir/etc/maze-cloak/config.json" << 'CONFIG'
+{
+  "enabled": true,
+  "rotate_enabled": false,
+  "rotate_on_start": false,
+  "nm_cloned_mode": "stable"
+}
+CONFIG
 
     # ── Rotation daemon (systemd) ──────────────────────────────────────────
     # Runs as root: changing a MAC address needs CAP_NET_ADMIN, and doing it
@@ -81,7 +138,7 @@ Wants=network-pre.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/maze-cloak
-ExecStart=/opt/maze-cloak/venv/bin/python3 -m mazecloak.daemon
+ExecStart=/opt/maze/venv/bin/python3 -m mazecloak.daemon
 Restart=on-failure
 RestartSec=3
 
@@ -130,6 +187,19 @@ SYSUSERS
     install -dm755 "$pkgdir/usr/lib/tmpfiles.d"
     install -m644 /dev/stdin "$pkgdir/usr/lib/tmpfiles.d/maze-cloak.conf" << 'TMPFILES'
 d /etc/maze-cloak 0775 root maze -
+# ...and the config INSIDE it. The directory line alone was not enough.
+#
+# config.json is created while the ISO is being built, so it carries whatever
+# GID the 'maze' group happened to have in the airootfs. On the installed system
+# that number is meaningless: Calamares removes the live 'maze' user, userdel
+# takes its primary group with it, and systemd-sysusers recreates 'maze' with a
+# different GID. The file is left owned by an orphaned numeric group, so a user
+# who IS in 'maze' still cannot write their own settings — the directory looks
+# right and the app fails anyway.
+#
+# 'z' adjusts an existing file's owner and mode and does nothing when it is
+# absent, so this repairs machines already installed as well as new ones.
+z /etc/maze-cloak/config.json 0664 root maze -
 TMPFILES
 
     # ── .desktop entry (application menu) ──────────────────────────────────

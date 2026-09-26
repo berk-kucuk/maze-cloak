@@ -12,7 +12,7 @@
 
 pkgname=maze-cloak
 pkgver=1.3.0
-pkgrel=2
+pkgrel=4
 pkgdesc="Maze Cloak — MAC address randomisation with scheduled rotation for the Maze suite"
 arch=('x86_64' 'aarch64')
 url="https://github.com/berk-kucuk/maze-cloak"
@@ -160,6 +160,21 @@ RestrictSUIDSGID=true
 RestrictNamespaces=true
 LockPersonality=true
 MemoryDenyWriteExecute=true
+# Sandbox (2026-09): the daemon changes MACs over netlink (`ip link`), asks
+# NetworkManager to reload over D-Bus and writes /etc/NetworkManager/conf.d —
+# all kept. Taken away: module loading, kernel tunables, the clock, raw
+# devices, realtime, foreign-ABI and non-service syscalls (EPERM, not a kill).
+# Verify: sudo maze-sandbox-check   Relax locally: sudo systemctl edit maze-cloak
+PrivateTmp=true
+PrivateDevices=true
+ProtectClock=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 
 [Install]
 WantedBy=multi-user.target

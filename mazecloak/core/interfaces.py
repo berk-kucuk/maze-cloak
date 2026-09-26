@@ -212,11 +212,11 @@ def set_mac(name: str, mac: str) -> tuple[bool, str]:
         return subprocess.run(args, capture_output=True, text=True, timeout=15)
 
     try:
-        r = _run(["ip", "link", "set", name, "address", mac])
+        r = _run(["ip", "link", "set", "dev", name, "address", mac])
         if r.returncode != 0:
-            _run(["ip", "link", "set", name, "down"])
-            r = _run(["ip", "link", "set", name, "address", mac])
-            _run(["ip", "link", "set", name, "up"])
+            _run(["ip", "link", "set", "dev", name, "down"])
+            r = _run(["ip", "link", "set", "dev", name, "address", mac])
+            _run(["ip", "link", "set", "dev", name, "up"])
             if r.returncode != 0:
                 return False, r.stderr.strip() or "ip link set address failed"
     except (OSError, subprocess.SubprocessError) as e:

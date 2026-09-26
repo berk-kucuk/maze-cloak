@@ -14,6 +14,12 @@ import re
 
 _MAC_RE = re.compile(r"^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$")
 
+# The OS CSPRNG, not the module-level Mersenne Twister. The whole point of a
+# rotated address is that an observer cannot link it to the previous one; MT's
+# state can be reconstructed from enough of its output, after which every
+# future address is predictable. SystemRandom has no state to recover.
+_rng = random.SystemRandom()
+
 # Generation strategies, in the order they appear in the UI.
 FULL_RANDOM = "full_random"
 KEEP_VENDOR = "keep_vendor"
@@ -108,15 +114,15 @@ def random_mac(strategy: str = FULL_RANDOM, current: str | None = None) -> str:
     unparseable rather than raising: the caller is a rotation timer, and a
     failed rotation is worse than a differently-shaped address.
     """
-    tail = [random.randint(0, 255) for _ in range(3)]
+    tail = [_rng.randint(0, 255) for _ in range(3)]
 
     if strategy == KEEP_VENDOR and is_valid(current or ""):
         head = [int(p, 16) for p in normalise(current).split(":")[:3]]
     elif strategy == RANDOM_VENDOR:
-        oui, _name = random.choice(VENDOR_OUIS)
+        oui, _name = _rng.choice(VENDOR_OUIS)
         head = [int(p, 16) for p in oui.split(":")]
     else:
-        head = [random.randint(0, 255) for _ in range(3)]
+        head = [_rng.randint(0, 255) for _ in range(3)]
 
     head[0] = _local_unicast(head[0])
     return ":".join(f"{b:02x}" for b in head + tail)

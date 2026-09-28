@@ -25,6 +25,10 @@ from PyQt6.QtGui import (
 )
 
 _LOGO_PATH = Path(__file__).parent.parent.parent / "MAZE-CLOAK.png"
+# The tray gets its own artwork: the full logo carries a MAC address line that
+# turns into stray pixels at panel sizes, so this one drops it and thickens the
+# strokes.
+_TRAY_PATH = Path(__file__).parent.parent.parent / "MAZE-CLOAK-TRAY.png"
 
 # Sizes a panel, task switcher or notification may ask for. Supplying real
 # pixmaps at each one lets Qt pick rather than smooth-scaling from a single size.
@@ -122,13 +126,24 @@ def create_app_icon(size: int = 64) -> QIcon:
 def tray_icon() -> QIcon:
     """The mark for the system tray.
 
-    Prefers the installed themed icon, which lets the panel scale from hicolor
-    at whatever size and DPI it actually uses; falls back to the trimmed
-    in-tree pixmap when running from a checkout.
+    Prefers the installed themed tray icon, which lets the panel scale from
+    hicolor at whatever size and DPI it actually uses; falls back to the
+    in-tree tray artwork when running from a checkout, and to the app icon if
+    that is missing too.
     """
-    themed = QIcon.fromTheme("maze-cloak")
+    themed = QIcon.fromTheme("maze-cloak-tray")
     if not themed.isNull():
         return themed
+    if _TRAY_PATH.exists():
+        source = QPixmap(str(_TRAY_PATH))
+        if not source.isNull():
+            icon = QIcon()
+            for edge in _ICON_SIZES:
+                icon.addPixmap(source.scaled(
+                    edge, edge,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation))
+            return icon
     return create_app_icon(128)
 
 

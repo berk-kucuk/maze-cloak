@@ -83,19 +83,62 @@ Maze Cloak writes `/etc/NetworkManager/conf.d/99-maze-cloak.conf`. **Maze Contro
 
 ## Installation
 
-### Build and install locally (Arch)
+### From the Maze repository
+
+**On Maze Linux** the repository is already configured:
 
 ```bash
-./build-pkg.sh
+sudo pacman -S maze-cloak
 ```
 
-The script runs the test suite, builds the package into `./dist-pkg/`, and stops. It never installs and never asks for a password. Install it yourself with the command it prints:
+**On Arch Linux and Arch-based distributions**, add the repository once:
+
+1. Import and trust the Maze signing key:
+
+   ```bash
+   curl -O https://mazerepo.berkkucukk.com.tr/packages/mazelinux.gpg
+   gpg --show-keys --with-fingerprint mazelinux.gpg
+   sudo pacman-key --add mazelinux.gpg
+   sudo pacman-key --lsign-key 7C4D515A6B930CB04794CEF6147C8159B3E2EE5F
+   ```
+
+   The fingerprint `gpg` prints must be `7C4D 515A 6B93 0CB0 4794  CEF6 147C 8159 B3E2 EE5F`.
+
+2. Add the repository to the end of `/etc/pacman.conf`:
+
+   ```ini
+   [mazelinux]
+   SigLevel = Required DatabaseOptional
+   Server = https://mazerepo.berkkucukk.com.tr/packages
+   ```
+
+3. Sync and install:
+
+   ```bash
+   sudo pacman -Syu maze-cloak
+   ```
+
+Optionally install `mazelinux-keyring` as well; it keeps the signing key up to date through pacman.
+
+Remove with `sudo pacman -Rns maze-cloak`.
+
+### Build from source
 
 ```bash
+sudo pacman -S --needed base-devel git imagemagick
+git clone https://github.com/berk-kucuk/maze-cloak.git
+cd maze-cloak
+./build-pkg.sh
 sudo pacman -U dist-pkg/maze-cloak-*-x86_64.pkg.tar.zst
 ```
 
-Then **log out and back in once** so your new `maze` group membership applies, and start the daemon — from the app's Overview tab, or:
+The script runs the test suite, builds the package into `./dist-pkg/`, and stops. It never installs and never asks for a password; `pacman -U` pulls in the runtime dependencies.
+
+`maze-python` (the shared Python runtime) comes from the Maze repository, so add the repository first (steps 1–2 above).
+
+### After installing
+
+**Log out and back in once** so your new `maze` group membership applies, then start the daemon — from the app's Overview tab, or:
 
 ```bash
 sudo systemctl enable --now maze-cloak.service

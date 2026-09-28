@@ -72,7 +72,7 @@ mkdir -p "$STAGE"
 cp -r "$ROOT/mazecloak" "$STAGE/"
 find "$STAGE/mazecloak" -name __pycache__ -type d -prune -exec rm -rf {} +
 find "$STAGE/mazecloak" -name '*.pyc' -delete
-for f in main.py pyproject.toml requirements.txt MAZE-CLOAK.png LICENSE README.md; do
+for f in main.py pyproject.toml requirements.txt MAZE-CLOAK.png MAZE-CLOAK-TRAY.png maze-cloak-tray.svg LICENSE README.md; do
   if [[ -f "$ROOT/$f" ]]; then cp "$ROOT/$f" "$STAGE/"; else warn "skipping missing $f"; fi
 done
 

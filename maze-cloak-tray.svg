@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Tray variant of maze-cloak-logo.svg: no MAC text, no sheen, bigger card
+       and heavier strokes so it still reads at 16–24 px on a panel. -->
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="#000"/>
+
+  <g transform="translate(0 -24)">
+    <g fill="none" stroke="#fff" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+      <!-- PCIe bracket -->
+      <path d="M100 262 H158 Q204 262 204 308 V832 H160"/>
+      <!-- PCB -->
+      <rect x="262" y="310" width="660" height="420" rx="64"/>
+      <!-- Edge connector -->
+      <path d="M400 730 V810 H630 V730"/>
+      <path d="M700 730 V810 H830 V730"/>
+      <!-- Network controller chip -->
+      <rect x="330" y="386" width="250" height="250" rx="56"/>
+      <!-- RJ45 port -->
+      <path d="M660 398 H862 V540 H818 V586 H704 V540 H660 Z"/>
+    </g>
+
+    <!-- Edge connector separators -->
+    <g stroke="#fff" stroke-width="30" stroke-linecap="round">
+      <path d="M477 745 V795 M553 745 V795 M765 745 V795"/>
+    </g>
+
+    <!-- Network topology inside the chip -->
+    <g stroke="#fff" stroke-width="24" stroke-linecap="round">
+      <path d="M455 518 L398 462 M455 518 L512 462 M455 518 L455 584"/>
+    </g>
+    <g fill="#fff">
+      <circle cx="455" cy="518" r="32"/>
+      <circle cx="398" cy="462" r="26"/>
+      <circle cx="512" cy="462" r="26"/>
+      <circle cx="455" cy="584" r="26"/>
+    </g>
+  </g>
+</svg>

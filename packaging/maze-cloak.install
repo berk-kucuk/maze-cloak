@@ -69,6 +69,13 @@ _add_user_to_group() {
         _warn "    sudo usermod -aG maze \$USER   # then log out and back in"
         return
     fi
+    # SUDO_USER is inherited from the environment pacman ran in. In an image
+    # build (mkarchiso's chroot) or any chroot install that is the HOST's user,
+    # who is not an account of this system — nothing to add, and no warning:
+    # the install is not missing a step.
+    if [ -n "$target" ] && ! getent passwd "$target" >/dev/null 2>&1; then
+        return 0
+    fi
     if id -nG "$target" 2>/dev/null | grep -qw maze; then
         _ok "User '$target' is already in the 'maze' group"
         return

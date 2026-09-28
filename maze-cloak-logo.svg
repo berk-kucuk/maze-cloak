@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- OLED glass: near-black body with a faint top sheen -->
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="0.35" stop-color="#ffffff" stop-opacity="0.02"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.16"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.52" r="0.5">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.07"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="chipClip">
+      <rect x="318" y="468" width="220" height="220" rx="44"/>
+    </clipPath>
+  </defs>
+
+  <!-- Squircle body -->
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="#000"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#glow)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#sheen)"/>
+  <rect x="3" y="3" width="1018" height="1018" rx="225" fill="none" stroke="url(#rim)" stroke-width="6"/>
+
+  <g fill="none" stroke="#fff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+    <!-- PCIe bracket -->
+    <path d="M150 360 H200 Q236 360 236 396 V790 H200"/>
+    <!-- PCB -->
+    <rect x="270" y="400" width="600" height="340" rx="48"/>
+    <!-- Edge connector fingers -->
+    <path d="M400 740 V800 H620 V740"/>
+    <path d="M458 752 V790 M510 752 V790 M562 752 V790"/>
+    <path d="M680 740 V800 H790 V740"/>
+    <path d="M735 752 V790"/>
+    <!-- Network controller chip -->
+    <rect x="318" y="468" width="220" height="220" rx="44"/>
+    <!-- Ethernet (RJ45) port -->
+    <path d="M630 480 H810 V600 H770 V630 H670 V600 H630 Z"/>
+  </g>
+
+  <!-- Chip pins -->
+  <g stroke="#fff" stroke-width="14" stroke-linecap="round">
+    <path d="M370 452 V438 M428 452 V438 M486 452 V438"/>
+    <path d="M370 704 V718 M428 704 V718 M486 704 V718"/>
+  </g>
+
+  <!-- Network topology inside the chip -->
+  <g stroke="#fff" stroke-width="12" stroke-linecap="round">
+    <path d="M428 578 L375 528 M428 578 L481 528 M428 578 L428 645"/>
+  </g>
+  <g fill="#fff">
+    <circle cx="428" cy="578" r="22"/>
+    <circle cx="375" cy="528" r="16"/>
+    <circle cx="481" cy="528" r="16"/>
+    <circle cx="428" cy="645" r="16"/>
+  </g>
+
+  <!-- RJ45 contact pins -->
+  <g stroke="#fff" stroke-width="10" stroke-linecap="round" opacity="0.9">
+    <path d="M672 512 V540 M700 512 V540 M728 512 V540 M756 512 V540"/>
+  </g>
+
+  <!-- Status LEDs -->
+  <circle cx="660" cy="690" r="13" fill="#fff"/>
+  <circle cx="704" cy="690" r="13" fill="none" stroke="#fff" stroke-width="7"/>
+
+  <!-- MAC address, last bytes cloaked -->
+  <g font-family="DejaVu Sans Mono" font-weight="bold" font-size="62" fill="#fff" text-anchor="middle">
+    <text x="512" y="272" letter-spacing="2">3A:F7:<tspan fill-opacity="0.35">••:••:••</tspan></text>
+  </g>
+  <!-- Underline scanner bar -->
+  <rect x="226" y="298" width="572" height="8" rx="4" fill="#fff" opacity="0.18"/>
+  <rect x="226" y="298" width="220" height="8" rx="4" fill="#fff"/>
+</svg>

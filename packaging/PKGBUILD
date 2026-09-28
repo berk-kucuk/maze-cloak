@@ -11,8 +11,8 @@
 #   source=("$pkgname-$pkgver.tar.gz::https://github.com/berk-kucuk/maze-cloak/archive/refs/tags/v$pkgver.tar.gz")
 
 pkgname=maze-cloak
-pkgver=1.3.0
-pkgrel=4
+pkgver=1.3.2
+pkgrel=1
 pkgdesc="Maze Cloak — MAC address randomisation with scheduled rotation for the Maze suite"
 arch=('x86_64' 'aarch64')
 url="https://github.com/berk-kucuk/maze-cloak"
@@ -52,6 +52,7 @@ package() {
     [[ -f pyproject.toml   ]] && install -m644 pyproject.toml   "$pkgdir/opt/maze-cloak/"
     [[ -f requirements.txt ]] && install -m644 requirements.txt "$pkgdir/opt/maze-cloak/"
     [[ -f MAZE-CLOAK.png   ]] && install -m644 MAZE-CLOAK.png   "$pkgdir/opt/maze-cloak/"
+    [[ -f MAZE-CLOAK-TRAY.png ]] && install -m644 MAZE-CLOAK-TRAY.png "$pkgdir/opt/maze-cloak/"
 
     # ── Launcher → /usr/bin/maze-cloak ─────────────────────────────────────
     install -dm755 "$pkgdir/usr/bin"
@@ -275,6 +276,23 @@ AUTOSTART
             else
                 install -m644 MAZE-CLOAK.png "$_dest"
             fi
+        done
+    fi
+
+    # ── Tray icon ──────────────────────────────────────────────────────────
+    # Separate artwork without the MAC address line, which is unreadable at
+    # panel sizes. Shipped as SVG so the panel renders it crisp at any DPI,
+    # with PNGs for anything that ignores scalable/.
+    if [[ -f maze-cloak-tray.svg ]]; then
+        install -Dm644 maze-cloak-tray.svg \
+            "$pkgdir/usr/share/icons/hicolor/scalable/apps/maze-cloak-tray.svg"
+    fi
+    if [[ -f MAZE-CLOAK-TRAY.png ]]; then
+        for size in 16 22 24 32 48 64 128 256; do
+            _dest="$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/maze-cloak-tray.png"
+            install -dm755 "$(dirname "$_dest")"
+            magick MAZE-CLOAK-TRAY.png -resize "${size}x${size}" "$_dest" 2>/dev/null \
+                || install -m644 MAZE-CLOAK-TRAY.png "$_dest"
         done
     fi
 

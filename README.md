@@ -233,6 +233,8 @@ The suite blocks `subprocess` outright, so no test can shell out, touch an inter
 
 ## License
 
+Copyright © 2026 Berk Küçük
+
 GPL3 — see [LICENSE](LICENSE).
 
 ---
